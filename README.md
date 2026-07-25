@@ -65,6 +65,6 @@ Optional:
 ⚠️ Disclaimer
 This project is developed for educational and research purposes only. It demonstrates the application of sentiment analysis and market indicators in generating trading signals.
 
-Not Financial Advice: This system is not intended to provide financial advice. Any trading decisions made based on the outputs of this system are at your own risk.
-No Guarantees: There are no guarantees of profit or freedom from loss. Algorithmic trading carries significant risks, and past performance (especially with synthetic data) is not indicative of future results.
-Real-Money Trading: This system is not designed for direct real-money trading without substantial modifications, rigorous testing, and adherence to regulatory requirements. Always consult with a qualified financial professional before making any investment decisions.
+- Not Financial Advice: This system is not intended to provide financial advice. Any trading decisions made based on the outputs of this system are at your own risk.
+- No Guarantees: There are no guarantees of profit or freedom from loss. Algorithmic trading carries significant risks, and past performance (especially with synthetic data) is not indicative of future results.
+- Real-Money Trading: This system is not designed for direct real-money trading without substantial modifications, rigorous testing, and adherence to regulatory requirements. Always consult with a qualified financial professional before making any investment decisions.
