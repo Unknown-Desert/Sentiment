@@ -7,12 +7,12 @@ import sys
 import platform
 import requests
 import shutil
+import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from playwright.async_api import async_playwright
 
 def get_unicode_support():
-    """Deteksi apakah terminal mendukung Unicode."""
     try:
         print("\u2b07", end="", flush=True)
         print("\r", end="", flush=True)
@@ -41,7 +41,6 @@ SHOW_TIMESTAMP = False
 
 API_URL = "https://my.ex-markets.pro/v4/tex-api/v1/sentiment/all/"
 CSV_FILE = r"C:\Users\User MSI\Desktop\sentiment_data.csv"
-
 HMR_API_URL = "https://my.ex-markets.pro/v4/tex-api/v2/forex-news/margin/today/"
 TRADING_CENTRAL_NEWS_URL = "https://my.ex-markets.pro/v4/tex-api/v1/trading-central-news/events/en/"
 
@@ -56,7 +55,6 @@ COUNTRY_IMPACT_MAP = {
     "CA": ["USDCAD"],
     "CH": ["USDCHF"],
 }
-
 SYMBOLS = [
     "XAUUSD",
     "DXY",
@@ -79,14 +77,13 @@ WAIT_AFTER_LAUNCH = 3
 WAIT_AFTER_RELOAD = 5
 user_data_dir = None
 
-TOKEN_FILE = "jwt_token.txt"
+CONFIG_FILE = "Sentiment_Dat.txt"
 JWT_TOKEN = ""
-
-RTAPI_BASE_URL = "https://rtapi-sg.fognetgapoatseadaymagqak.com/rtapi/mt5/trial8/v2/accounts/279675500/instruments"
-RTAPI_X_CID = "exterm_web_5a178e29-3ea5-4bbd-823f-e67f1d64f24e"
+RTAPI_BASE_URL = ""
+RTAPI_X_CID = ""
 
 COMMON_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Referer": "https://my.ex-markets.pro/webtrading/",
     "Accept-Language": "id-ID,id;q=0.9",
@@ -100,7 +97,6 @@ DEFAULT_LEVERAGE = 500
 NORMAL_MARGIN_PCT = round(100 / DEFAULT_LEVERAGE, 2)
 
 def safe_print(text, **kwargs):
-    """Wrapper untuk print yang aman dari UnicodeEncodeError."""
     try:
         print(text, **kwargs)
     except UnicodeEncodeError:
@@ -108,34 +104,70 @@ def safe_print(text, **kwargs):
         print(text_ascii, **kwargs)
 
 def log(message):
-    """Fungsi logging dengan timestamp opsional."""
     if SHOW_TIMESTAMP:
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         safe_print(f"[{timestamp}] {message}")
     else:
         safe_print(message)
+        
+def hide_file(filepath):
+    try:
+        if platform.system() == "Windows":
+            import ctypes
+            ret = ctypes.windll.kernel32.SetFileAttributesW(filepath, 2)
+            if ret:
+                return True
+            else:
+                subprocess.run(["attrib", "+h", filepath], 
+                             stdout=subprocess.DEVNULL, 
+                             stderr=subprocess.DEVNULL,
+                             shell=True)
+                return True
+        else:
+            return True
+    except Exception as e:
+        safe_print(f"   ⚠️  Gagal menyembunyikan file: {e}")
+        return False
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                content = f.read().strip()
+                if content:
+                    return json.loads(content)
+        except:
+            pass
+    return {}
+
+def save_config(config_dict):
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config_dict, f, indent=2)
+        hide_file(CONFIG_FILE)
+    except Exception as e:
+        safe_print(f"⚠️  Gagal menyimpan config: {e}")
 
 def load_token():
-    """Baca token dari file TOKEN_FILE."""
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, 'r') as f:
-            token = f.read().strip()
-            if token:
-                return token
-    return None
+    cfg = load_config()
+    return cfg.get("jwt_token", "")
 
 def save_token(token):
-    """Simpan token ke TOKEN_FILE."""
-    with open(TOKEN_FILE, 'w') as f:
-        f.write(token)
+    cfg = load_config()
+    cfg["jwt_token"] = token
+    save_config(cfg)
+
+def load_rtapi_config():
+    cfg = load_config()
+    return cfg.get("rtapi_base_url", ""), cfg.get("rtapi_x_cid", "")
+
+def save_rtapi_config(base_url, x_cid):
+    cfg = load_config()
+    cfg["rtapi_base_url"] = base_url
+    cfg["rtapi_x_cid"] = x_cid
+    save_config(cfg)
 
 def predict_candle_direction(buy_pct, sell_pct):
-    """
-    Memprediksi arah candle berdasarkan persentase buy/sell.
-    - Buy > Sell DAN Buy >= 60% : Bearish (ARROW_DOWN)
-    - Sell > Buy DAN Sell >= 60% : Bullish (ARROW_UP)
-    - Lainnya : Sideways (ARROW_SIDEWAYS) — termasuk semua kondisi BALANCE
-    """
     if buy_pct >= 60:
         return ARROW_DOWN
     
@@ -145,9 +177,6 @@ def predict_candle_direction(buy_pct, sell_pct):
     return ARROW_SIDEWAYS
 
 def get_candle_prediction_detail(buy_pct, sell_pct):
-    """
-    Memberikan detail prediksi candle dengan penjelasan.
-    """
     direction = predict_candle_direction(buy_pct, sell_pct)
     
     if direction == ARROW_DOWN:
@@ -160,10 +189,6 @@ def get_candle_prediction_detail(buy_pct, sell_pct):
     return direction, detail
 
 def get_sentiment_flag(buy_pct, sell_pct):
-    """
-    Menentukan flag berdasarkan persentase sentimen.
-    Hanya menghasilkan: 🟢 BUY, 🔴 SELL, atau ⚪ BALANCE.
-    """
     if sell_pct >= 60:
         return "🔴 SELL"
     elif buy_pct >= 60:
@@ -172,13 +197,7 @@ def get_sentiment_flag(buy_pct, sell_pct):
         return "⚪ BALANCE"
 
 def check_dxy_warning(symbols_data, data_status=None):
-    """
-    Memeriksa apakah DXY dalam kondisi warning.
-    Hanya DXY yang diperiksa, tidak mempengaruhi pair lain.
-    
-    Return:
-        (is_warning, reason)
-    """
+
     if data_status is None:
         data_status = {}
     
@@ -202,10 +221,6 @@ def check_dxy_warning(symbols_data, data_status=None):
     return False, "DXY normal"
 
 def write_csv(symbols_data, dxy_warning=False, data_status=None, candle_predictions=None):
-    """
-    Tulis data sentimen multi-simbol ke CSV.
-    Untuk DXY dengan data tidak segar, prediksi di-override menjadi "WARNING".
-    """
     if data_status is None:
         data_status = {}
     if candle_predictions is None:
@@ -250,52 +265,59 @@ def write_csv(symbols_data, dxy_warning=False, data_status=None, candle_predicti
         f.write(','.join(row_parts))
 
 def generate_request_id():
-    """Generate random request ID seperti di header x-request-id."""
     return str(uuid.uuid4()).replace('-', '')
 
 def fetch_price_for_symbol(symbol):
-    """
-    Ambil harga close terbaru (candle 1 menit) untuk satu simbol.
-    Return: float harga, atau None jika gagal.
-    """
     global JWT_TOKEN
     if not JWT_TOKEN:
         return None
 
-    url = f"{RTAPI_BASE_URL}/{symbol.upper()}/candles"
-    params = {
-        "time_frame": "1",
-        "from": "9007199254740991",
-        "count": "-1",
-        "price": "bid"
-    }
-    headers = {
-        "Authorization": f"Bearer {JWT_TOKEN}",
-        "x-cid": RTAPI_X_CID,
-        "x-request-id": generate_request_id(),
-        "Accept": "application/json, text/plain, */*",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://my.ex-markets.pro/",
-        "Origin": "https://my.ex-markets.pro",
-        "dnt": "1",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
+    candidates = [
+        symbol.upper(),
+        symbol.upper() + "m",
+        # symbol.upper() + "Vm", # Uncomment jika suatu saat dibutuhkan
+    ]
 
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=3)
-        if response.status_code == 200:
-            data = response.json()
-            if 'price_history' in data and len(data['price_history']) > 0:
-                return data['price_history'][0]['c']
-    except:
-        pass
+    for sym in candidates:
+        url = f"{RTAPI_BASE_URL}/{sym}/candles"
+        params = {
+            "time_frame": "1",
+            "from": "9007199254740991",
+            "count": "-300",
+            "price": "bid"
+        }
+        headers = {
+            "Authorization": f"Bearer {JWT_TOKEN}",
+            "x-cid": RTAPI_X_CID,
+            "x-request-id": generate_request_id(),
+            "Accept": "application/json, text/plain, */*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://my.ex-markets.pro/",
+            "Origin": "https://my.ex-markets.pro",
+            "dnt": "1",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if 'price_history' in data and len(data['price_history']) > 0:
+                    return data['price_history'][0]['c']
+            if response.status_code == 400:
+                try:
+                    err = response.json()
+                    if err.get("code") == 10013:
+                        continue
+                except:
+                    pass
+            return None
+
+        except:
+            return None
     return None
 
 def fetch_all_prices():
-    """
-    Ambil harga untuk semua simbol di SYMBOLS.
-    Return: dict {symbol: price_or_None}
-    """
     prices = {}
     for sym in SYMBOLS:
         try:
@@ -305,10 +327,8 @@ def fetch_all_prices():
     return prices
 
 def format_price(symbol, price):
-    """Format harga sesuai tipe pair."""
     if price is None:
         return "N/A"
-
     if symbol in ("XAUUSD", "XAGUSD", "DXY", "BTCUSD", "ETHUSD"):
         return f"{price:,.2f}"
     elif symbol == "USDJPY":
@@ -317,9 +337,6 @@ def format_price(symbol, price):
         return f"{price:.5f}"
 
 def find_matching_symbols(data):
-    """
-    Cocokkan simbol dari daftar SYMBOLS dengan key di data JSON.
-    """
     global last_valid_data
     matched = {}
     data_status = {}
@@ -358,9 +375,6 @@ def find_matching_symbols(data):
     return matched, data_status
 
 def fetch_sentiment():
-    """
-    Ambil data sentimen menggunakan token terkini.
-    """
     global JWT_TOKEN
     headers = COMMON_HEADERS.copy()
     headers["Authorization"] = f"Bearer {JWT_TOKEN}"
@@ -388,10 +402,6 @@ def fetch_sentiment():
         return (-1, None)
 
 def fetch_hmr_today():
-    """
-    Ambil data HMR hari ini.
-    Return: list periode HMR atau [] jika gagal.
-    """
     global JWT_TOKEN
     if not JWT_TOKEN:
         return []
@@ -410,49 +420,37 @@ def fetch_hmr_today():
         return []
 
 def check_hmr_for_symbols(hmr_periods):
-    """
-    Cek simbol mana yang sedang dalam periode HMR saat ini.
-    Pola HMR dicocokkan ke SYMBOLS dengan presisi tinggi.
-    Return: dict {symbol: (is_hmr, leverage, start_timestamp, end_timestamp)}
-    """
     now = int(time.time())
     result = {sym: (False, None, None, None) for sym in SYMBOLS}
     
     for period in hmr_periods:
         start = period.get('start', 0)
         end = period.get('end', 0)
-        
         if not (start <= now <= end):
             continue
         
         symbols_in_period = period.get('symbols', [])
         leverage = period.get('leverage', '?')
-        
         if not symbols_in_period:
             for sym in SYMBOLS:
                 result[sym] = (True, leverage, start, end)
             continue
-        
         for pattern in symbols_in_period:
             pattern_clean = pattern.replace('*', '').upper().strip()
             
             for sym in SYMBOLS:
                 sym_upper = sym.upper()
-                
                 if pattern_clean == sym_upper:
                     result[sym] = (True, leverage, start, end)
                     continue
-                
                 if pattern.startswith('*') and pattern.endswith('*'):
                     if pattern_clean and pattern_clean in sym_upper:
                         result[sym] = (True, leverage, start, end)
                         continue
-                
                 elif pattern.endswith('*'):
                     if pattern_clean and sym_upper.startswith(pattern_clean):
                         result[sym] = (True, leverage, start, end)
                         continue
-                
                 elif pattern.startswith('*'):
                     if pattern_clean and sym_upper.endswith(pattern_clean):
                         result[sym] = (True, leverage, start, end)
@@ -460,13 +458,7 @@ def check_hmr_for_symbols(hmr_periods):
     
     return result
 
-
 def fetch_trading_central_news():
-    """
-    Ambil berita ekonomi yang akan datang (volatility >= 2).
-    Hanya ambil berita untuk HARI INI dan BESOK (48 jam ke depan).
-    Return: tuple (today_news, tomorrow_news)
-    """
     global JWT_TOKEN
     if not JWT_TOKEN:
         return [], []
@@ -538,14 +530,9 @@ def fetch_trading_central_news():
         return [], []
 
 def get_affected_symbols(country_code):
-    """Daftar simbol yang terpengaruh berita dari negara tertentu."""
     return COUNTRY_IMPACT_MAP.get(country_code, [])
 
 def get_news_time_for_symbol(sym, news_list):
-    """
-    Mendapatkan waktu berita TERDEKAT yang mempengaruhi simbol tertentu.
-    Return: tuple (display_string, volatility_tertinggi, count_di_jam_itu) atau (None, None, 0)
-    """
     if not news_list:
         return None, None, 0
     
@@ -573,10 +560,6 @@ def get_news_time_for_symbol(sym, news_list):
     return display, highest_vol, same_time_count
 
 def get_news_display_for_symbol(sym, today_news, tomorrow_news):
-    """
-    Menentukan apa yang ditampilkan di kolom News.
-    Prioritas: Berita hari ini > Tomorrow > ❌
-    """
     news_display, _, _ = get_news_time_for_symbol(sym, today_news)
     if news_display is not None:
         return news_display
@@ -588,10 +571,6 @@ def get_news_display_for_symbol(sym, today_news, tomorrow_news):
     return "❌"
 
 def calculate_candle_statistics(symbols_data, dxy_warning=False, data_status=None):
-    """
-    Menghitung statistik prediksi candle untuk semua simbol.
-    DXY dikeluarkan dari perhitungan statistik jika dalam kondisi warning.
-    """
     if data_status is None:
         data_status = {}
     
@@ -644,15 +623,6 @@ def calculate_candle_statistics(symbols_data, dxy_warning=False, data_status=Non
 def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMUA SIMBOL",
                            data_status=None, hmr_status=None, today_news=None, tomorrow_news=None,
                            prices=None):
-    """
-    Menampilkan SEMUA simbol dengan format bersih dan prediksi candle.
-    
-    KOLOM MARGIN: Leverage + persentase margin + rentang waktu (WIB)
-                  Normal: "1:500 (0.2%)"
-                  HMR Aktif: "⚠️ 1:30 (3.33%) 03/07 16:00 → 06/07 20:00"
-    KOLOM NEWS: Jam berita hari ini > "Tomorrow" > "❌"
-    KOLOM PRICE: Harga real-time dari RT-API, format sesuai pair
-    """
     if data_status is None:
         data_status = {}
     if hmr_status is None:
@@ -671,7 +641,7 @@ def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMU
         return dt.strftime('%d/%m %H:%M')
     
     log(title)
-
+    
     log("-" * 120)
     log(f"{'SYMBOL':<6} |{'Buy':>5}   | {'Sell':>5}  | {'Candle':^6} | {'Margin':^41} |  {'News':^8} | {'Price':^10} | {'Flag':^12}")
     log("-" * 120)
@@ -712,7 +682,6 @@ def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMU
                 price_display = format_price(sym, prices[sym])
             else:
                 price_display = "N/A"
-            
             log(f"{sym:<6} | {buy_pct:5.2f}% | {sell_pct:5.2f}% | {candle_display:^6} | {margin_display:<41} | {news_display:^8} | {price_display:<10} | {flag:<12}")
         else:
             price_display = "N/A"
@@ -722,7 +691,6 @@ def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMU
                 log(f"{sym:<6} | {'N/A':>5} | {'N/A':>5} | {'N/A':^6} | {'1:500 (0.2%)':<41} | {'❌':^8} | {price_display:<10} | {'NO DATA':<12}")
     
     log("-" * 120)
-    
     if candle_stats['total'] > 0:
         pair_count = candle_stats['total']
         pair_label = f"{pair_count} Pair"
@@ -760,10 +728,6 @@ def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMU
     log("")
 
 def display_news_and_hmr(hmr_periods, symbols_data=None, today_news=None, tomorrow_news=None):
-    """
-    Menampilkan SEMUA berita HARI INI terdekat + analisis.
-    Juga menampilkan ringkasan berita besok.
-    """
     try:
         if today_news:
             sorted_news = sorted(today_news, key=lambda x: (x['time'], -x['volatility']))
@@ -870,7 +834,6 @@ def display_news_and_hmr(hmr_periods, symbols_data=None, today_news=None, tomorr
         log(f"{WARNING} Gagal menampilkan berita: {e}")
 
 def display_legend():
-    """Menampilkan legenda untuk simbol dan flag."""
     safe_print("\n" + "="*65)
     safe_print("LEGENDA SIMBOL & PREDIKSI CANDLE")
     safe_print("")
@@ -880,7 +843,6 @@ def display_legend():
     safe_print("")
 
 def find_chrome_path():
-    """Cari path Chrome berdasarkan OS."""
     system = platform.system()
     paths = {
         "Windows": [
@@ -905,7 +867,6 @@ def find_chrome_path():
     sys.exit(1)
 
 def is_cdp_running():
-    """Cek apakah Chrome dengan CDP sudah berjalan di port yang ditentukan."""
     try:
         response = requests.get(f"{CDP_URL}/json/version", timeout=2)
         return response.status_code == 200
@@ -913,7 +874,6 @@ def is_cdp_running():
         return False
 
 def force_close_chrome():
-    """Tutup paksa semua proses Chrome."""
     print("\n🔴 Menutup paksa Chrome...")
     try:
         if platform.system() == "Windows":
@@ -930,7 +890,6 @@ def force_close_chrome():
         print(f"   ⚠️  Gagal menutup Chrome: {e}")
 
 def clean_chrome_history():
-    """Membersihkan histori Chrome pada profil sementara."""
     global user_data_dir
     if not user_data_dir:
         print("❌ Path profil Chrome tidak diketahui.")
@@ -984,7 +943,6 @@ def clean_chrome_history():
     return True
 
 def launch_chrome_with_cdp():
-    """Jalankan Chrome dengan flag remote debugging."""
     global user_data_dir
     chrome_path = find_chrome_path()
 
@@ -1020,7 +978,6 @@ def launch_chrome_with_cdp():
             sys.exit(1)
 
 async def open_target_page():
-    """Buka halaman target menggunakan Playwright via CDP."""
     async with async_playwright() as p:
         try:
             browser = await p.chromium.connect_over_cdp(CDP_URL)
@@ -1072,7 +1029,6 @@ async def open_target_page():
         return True
 
 def verify_cdp_json():
-    """Buka dan tampilkan daftar tab dari CDP JSON endpoint."""
     try:
         response = requests.get(f"{CDP_URL}/json", timeout=5)
         tabs = response.json()
@@ -1086,10 +1042,6 @@ def verify_cdp_json():
         return False
 
 async def wait_for_login_and_capture():
-    """
-    Menunggu hingga user berhasil login (tidak lagi di halaman sign-in)
-    dan kemudian menangkap token.
-    """
     async with async_playwright() as p:
         print("\n" + "="*60)
         print("🔍 LOGIN & CAPTURE AUTH")
@@ -1113,7 +1065,6 @@ async def wait_for_login_and_capture():
 
         for page in context.pages:
             current_url = page.url
-
             is_login_page = "/accounts/sign-in" in current_url or "/login" in current_url
             is_trading_page = "/webtrading/" in current_url and not is_login_page
 
@@ -1175,6 +1126,7 @@ async def wait_for_login_and_capture():
         await target_page.reload(wait_until="networkidle")
         
         captured_auths = []
+        rtapi_captured = {}
         
         def on_request(request):
             url = request.url
@@ -1197,26 +1149,45 @@ async def wait_for_login_and_capture():
                             "authorization": auth,
                             "timestamp": time.time()
                         })
+
+            if "candles" in url and "rtapi" in url and not rtapi_captured:
+                idx = url.find("/instruments")
+                if idx != -1:
+                    base_url = url[:idx] + "/instruments"
+                    x_cid = request.headers.get("x-cid", "")
+                    if base_url and x_cid:
+                        rtapi_captured["base_url"] = base_url
+                        rtapi_captured["x_cid"] = x_cid
+                        print(f"\n🔧 RT-API TERTANGKAP!")
+                        print(f"   Base URL: {base_url}")
+                        print(f"   X-CID: {x_cid}")
         
         target_page.on("request", on_request)
 
         await target_page.reload(wait_until="networkidle")
-
         await asyncio.sleep(WAIT_AFTER_RELOAD)
-
         await browser.close()
 
         if captured_auths:
-            for i, item in enumerate(captured_auths, 1):
-                token_preview = item['authorization'][:80] + "..." if len(item['authorization']) > 80 else item['authorization']
-
-            with open(TOKEN_FILE, "w") as f:
+            token_preview = captured_auths[0]['authorization'][:80] + "..."
+            
+            with open(CONFIG_FILE, "w") as f:
                 f.write("=== HASIL TANGKAPAN AUTHORIZATION ===\n")
                 f.write(f"Waktu: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 for i, item in enumerate(captured_auths, 1):
                     f.write(f"{i}. URL: {item['url']}\n")
                     f.write(f"   Token: {item['authorization']}\n\n")
-            print(f"\n💾 Saved in: {TOKEN_FILE}")
+            print(f"\n💾 Raw log saved in: {CONFIG_FILE}")
+
+            if rtapi_captured.get("base_url") and rtapi_captured.get("x_cid"):
+                save_rtapi_config(rtapi_captured["base_url"], rtapi_captured["x_cid"])
+                print(f"🔧 RT-API config saved to {CONFIG_FILE}")
+                global RTAPI_BASE_URL, RTAPI_X_CID
+                RTAPI_BASE_URL = rtapi_captured["base_url"]
+                RTAPI_X_CID = rtapi_captured["x_cid"]
+            else:
+                print("⚠️  RT-API config tidak tertangkap (candles request tidak ditemukan).")
+                print("   Harga real-time tidak akan tersedia sampai ada config.")
 
             return captured_auths
         else:
@@ -1228,7 +1199,7 @@ async def wait_for_login_and_capture():
             return None
 
 def refresh_token():
-    global JWT_TOKEN
+    global JWT_TOKEN, RTAPI_BASE_URL, RTAPI_X_CID
     
     if not is_cdp_running():
         launch_chrome_with_cdp()
@@ -1254,8 +1225,17 @@ def refresh_token():
             token = auth_header
         JWT_TOKEN = token
         save_token(token)
+        
+        hide_file(CONFIG_FILE)
+        
+        RTAPI_BASE_URL, RTAPI_X_CID = load_rtapi_config()
+        
         clean_chrome_history()
-        print(f"\n✅ Token Captured, Close Chrome and Clean History")
+        print(f"\n✅ Token Captured & Saved")
+        if RTAPI_BASE_URL:
+            print(f"🔧 RT-API Ready: {RTAPI_BASE_URL}")
+        else:
+            print(f"⚠️  RT-API config not found, harga tidak akan tersedia.")
         return True
     else:
         print("⚠️  Cant capture token. Please try again")
@@ -1264,6 +1244,13 @@ def refresh_token():
 
 def main():
     global JWT_TOKEN, last_valid_data
+
+    cfg = load_config()
+    JWT_TOKEN = cfg.get("jwt_token", "")
+    RTAPI_BASE_URL, RTAPI_X_CID = load_rtapi_config()
+
+    if os.path.exists(CONFIG_FILE):
+        hide_file(CONFIG_FILE)
     
     if platform.system() == "Windows":
         try:
@@ -1303,7 +1290,7 @@ def main():
         
         if symbols_data:
             log(f"{CHECK} {len(symbols_data)} dari {len(SYMBOLS)} simbol ditemukan.")
-            
+
             hmr_data_init = fetch_hmr_today()
             hmr_status_init = check_hmr_for_symbols(hmr_data_init) if hmr_data_init else {}
             today_news_init, tomorrow_news_init = fetch_trading_central_news()
