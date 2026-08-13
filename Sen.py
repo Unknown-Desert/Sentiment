@@ -782,7 +782,10 @@ def display_news_and_hmr(hmr_periods, symbols_data=None, today_news=None, tomorr
                 
                 utc7_time = target_time + timedelta(hours=7)
                 
-                log(f"\n📅 {len(top_news)} BERITA TERDEKAT:")
+                log(f"\n{'='*60}")
+                log(f"📅 {len(top_news)} BERITA TERDEKAT:")
+                log(f"{'='*60}")
+                log(f"")
                 for i, news in enumerate(top_news, 1):
                     impact_icon = "🔴" if news['volatility'] == 3 else "🟡"
                     news_time_wib = news['time'] + timedelta(hours=7)
@@ -801,6 +804,13 @@ def display_news_and_hmr(hmr_periods, symbols_data=None, today_news=None, tomorr
                         log(f"      Consensus {cons} vs Previous {prev} → {exp}")
                     else:
                         log(f"      Consensus/Previous tidak tersedia")
+                
+                utc7_time = target_time + timedelta(hours=7)
+                log(f"\n⏰ Waktu berita pertama: {utc7_time.strftime('%d %b %Y %H:%M')} WIB")
+                if hours > 0:
+                    log(f"⏳ Sisa waktu: {hours} jam {mins} menit lagi")
+                else:
+                    log(f"⏳ Sisa waktu: {mins} menit lagi")
                         
                     log(f"")
                 
@@ -848,7 +858,7 @@ def display_news_and_hmr(hmr_periods, symbols_data=None, today_news=None, tomorr
                     log(f"   ⚠️  Pair terdampak: {', '.join(our_affected)}")
                 
                 if total_sec < 1800:
-                    log(f"   🔴 HATI-HATI! Kurang dari 30 menit. JANGAN ENTRY!")
+                    log(f"   🔴 HATI-HATI! Kurang dari 30 menit. JANGAN OVERTRADE!")
                 elif total_sec < 3600:
                     log(f"   🟠 WASPADA! Kurang dari 1 jam. Pertimbangkan risiko.")
                 elif total_sec < 7200:
