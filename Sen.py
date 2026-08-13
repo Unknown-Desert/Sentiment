@@ -8,6 +8,8 @@ import platform
 import requests
 import shutil
 import json
+import random
+import string
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from playwright.async_api import async_playwright
@@ -55,6 +57,7 @@ COUNTRY_IMPACT_MAP = {
     "CA": ["USDCAD"],
     "CH": ["USDCHF"],
 }
+
 SYMBOLS = [
     "XAUUSD",
     "DXY",
@@ -77,7 +80,7 @@ WAIT_AFTER_LAUNCH = 3
 WAIT_AFTER_RELOAD = 5
 user_data_dir = None
 
-CONFIG_FILE = "Sentiment_Dat.txt"
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Sentiment_Dat.txt")
 JWT_TOKEN = ""
 RTAPI_BASE_URL = ""
 RTAPI_X_CID = ""
@@ -142,11 +145,32 @@ def load_config():
 
 def save_config(config_dict):
     try:
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(config_dict, f, indent=2)
-        hide_file(CONFIG_FILE)
+        json_text = json.dumps(config_dict, indent=2)
+        if write_text_safe(CONFIG_FILE, json_text):
+            hide_file(CONFIG_FILE)
+            return True
+        return False
     except Exception as e:
         safe_print(f"⚠️  Gagal menyimpan config: {e}")
+        return False
+        
+def write_text_safe(filepath, text):
+    try:
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        original_attrs = None
+        if path.exists() and platform.system() == "Windows":
+            import ctypes
+            original_attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
+            ctypes.windll.kernel32.SetFileAttributesW(str(path), 0x80)
+        path.write_text(text, encoding='utf-8')
+        if original_attrs is not None and platform.system() == "Windows":
+            import ctypes
+            ctypes.windll.kernel32.SetFileAttributesW(str(path), original_attrs)
+        return True
+    except Exception as e:
+        safe_print(f"⚠️  Gagal menulis file {filepath}: {e}")
+        return False
 
 def load_token():
     cfg = load_config()
@@ -155,7 +179,7 @@ def load_token():
 def save_token(token):
     cfg = load_config()
     cfg["jwt_token"] = token
-    save_config(cfg)
+    return save_config(cfg)
 
 def load_rtapi_config():
     cfg = load_config()
@@ -165,7 +189,7 @@ def save_rtapi_config(base_url, x_cid):
     cfg = load_config()
     cfg["rtapi_base_url"] = base_url
     cfg["rtapi_x_cid"] = x_cid
-    save_config(cfg)
+    return save_config(cfg)
 
 def predict_candle_direction(buy_pct, sell_pct):
     if buy_pct >= 60:
@@ -197,7 +221,6 @@ def get_sentiment_flag(buy_pct, sell_pct):
         return "⚪ BALANCE"
 
 def check_dxy_warning(symbols_data, data_status=None):
-
     if data_status is None:
         data_status = {}
     
@@ -268,14 +291,14 @@ def generate_request_id():
     return str(uuid.uuid4()).replace('-', '')
 
 def fetch_price_for_symbol(symbol):
-    global JWT_TOKEN
+    global JWT_TOKEN, RTAPI_BASE_URL, RTAPI_X_CID
     if not JWT_TOKEN:
         return None
 
     candidates = [
         symbol.upper(),
         symbol.upper() + "m",
-        # symbol.upper() + "Vm", # Uncomment jika suatu saat dibutuhkan
+        # symbol.upper() + "Vm",
     ]
 
     for sym in candidates:
@@ -300,10 +323,12 @@ def fetch_price_for_symbol(symbol):
 
         try:
             response = requests.get(url, params=params, headers=headers, timeout=5)
+
             if response.status_code == 200:
                 data = response.json()
                 if 'price_history' in data and len(data['price_history']) > 0:
                     return data['price_history'][0]['c']
+
             if response.status_code == 400:
                 try:
                     err = response.json()
@@ -311,6 +336,7 @@ def fetch_price_for_symbol(symbol):
                         continue
                 except:
                     pass
+
             return None
 
         except:
@@ -329,6 +355,7 @@ def fetch_all_prices():
 def format_price(symbol, price):
     if price is None:
         return "N/A"
+
     if symbol in ("XAUUSD", "XAGUSD", "DXY", "BTCUSD", "ETHUSD"):
         return f"{price:,.2f}"
     elif symbol == "USDJPY":
@@ -426,31 +453,38 @@ def check_hmr_for_symbols(hmr_periods):
     for period in hmr_periods:
         start = period.get('start', 0)
         end = period.get('end', 0)
+        
         if not (start <= now <= end):
             continue
         
         symbols_in_period = period.get('symbols', [])
         leverage = period.get('leverage', '?')
+        
         if not symbols_in_period:
             for sym in SYMBOLS:
                 result[sym] = (True, leverage, start, end)
             continue
+        
         for pattern in symbols_in_period:
             pattern_clean = pattern.replace('*', '').upper().strip()
             
             for sym in SYMBOLS:
                 sym_upper = sym.upper()
+                
                 if pattern_clean == sym_upper:
                     result[sym] = (True, leverage, start, end)
                     continue
+                
                 if pattern.startswith('*') and pattern.endswith('*'):
                     if pattern_clean and pattern_clean in sym_upper:
                         result[sym] = (True, leverage, start, end)
                         continue
+                
                 elif pattern.endswith('*'):
                     if pattern_clean and sym_upper.startswith(pattern_clean):
                         result[sym] = (True, leverage, start, end)
                         continue
+                
                 elif pattern.startswith('*'):
                     if pattern_clean and sym_upper.endswith(pattern_clean):
                         result[sym] = (True, leverage, start, end)
@@ -641,7 +675,6 @@ def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMU
         return dt.strftime('%d/%m %H:%M')
     
     log(title)
-    
     log("-" * 120)
     log(f"{'SYMBOL':<6} |{'Buy':>5}   | {'Sell':>5}  | {'Candle':^6} | {'Margin':^41} |  {'News':^8} | {'Price':^10} | {'Flag':^12}")
     log("-" * 120)
@@ -651,7 +684,6 @@ def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMU
             val = symbols_data[sym]
             buy_pct = round(val['buy'] * 100, 2)
             sell_pct = round(val['sell'] * 100, 2)
-            
             if sym == "DXY" and data_status.get("DXY", 1) != 1:
                 flag = "⛔ WARNING"
                 candle_display = WARNING
@@ -677,7 +709,7 @@ def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMU
                 margin_display = f"1:{DEFAULT_LEVERAGE} ({NORMAL_MARGIN_PCT}%)"
             
             news_display = get_news_display_for_symbol(sym, today_news, tomorrow_news)
-            
+
             if sym in prices:
                 price_display = format_price(sym, prices[sym])
             else:
@@ -691,6 +723,7 @@ def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMU
                 log(f"{sym:<6} | {'N/A':>5} | {'N/A':>5} | {'N/A':^6} | {'1:500 (0.2%)':<41} | {'❌':^8} | {price_display:<10} | {'NO DATA':<12}")
     
     log("-" * 120)
+    
     if candle_stats['total'] > 0:
         pair_count = candle_stats['total']
         pair_label = f"{pair_count} Pair"
@@ -700,6 +733,10 @@ def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMU
         bull_pct = candle_stats['bullish']/candle_stats['total']*100
         bear_pct = candle_stats['bearish']/candle_stats['total']*100
         side_pct = candle_stats['sideways']/candle_stats['total']*100
+        
+        log(f"XAUUSD : Stop Loss King")
+        log(f"EUR/USD : Toxic Cable")
+        log(f"USD/CAD : Oil Puppet")
         
         log(f"\nSTATISTIK PREDIKSI CANDLE ({pair_label}):")
         log(f"   {ARROW_UP} Bullish  : {candle_stats['bullish']:>2} simbol ({bull_pct:.1f}%)")
@@ -733,13 +770,9 @@ def display_news_and_hmr(hmr_periods, symbols_data=None, today_news=None, tomorr
             sorted_news = sorted(today_news, key=lambda x: (x['time'], -x['volatility']))
             
             if sorted_news:
-                first_news = sorted_news[0]
+                top_news = sorted_news[:3]
+                first_news = top_news[0]
                 target_time = first_news['time']
-                
-                same_time_news = []
-                for n in sorted_news:
-                    if n['time'] == target_time:
-                        same_time_news.append(n)
                 
                 now = datetime.now(timezone.utc)
                 time_left = target_time - now
@@ -749,28 +782,29 @@ def display_news_and_hmr(hmr_periods, symbols_data=None, today_news=None, tomorr
                 
                 utc7_time = target_time + timedelta(hours=7)
                 
-                if len(same_time_news) == 1:
-                    news = same_time_news[0]
+                log(f"\n📅 {len(top_news)} BERITA TERDEKAT:")
+                for i, news in enumerate(top_news, 1):
                     impact_icon = "🔴" if news['volatility'] == 3 else "🟡"
-                    log(f"\n📅 BERITA HARI INI: {news['name']} ({news['country']})")
-                    log(f"   Negara: {news['country']} | Dampak: {impact_icon} {news['vol_label']}")
-                else:
-                    news_names = []
-                    for n in same_time_news:
-                        news_names.append(f"{n['name']} ({n['country']})")
-                    
-                    highest_vol = max(n['volatility'] for n in same_time_news)
-                    impact_icon = "🔴" if highest_vol == 3 else "🟡"
-                    
-                    log(f"\n📅 BERITA HARI INI ({len(same_time_news)} berita):")
-                    for name in news_names:
-                        log(f"   • {name}")
-                    log(f"   Dampak Tertinggi: {impact_icon} {'HIGH' if highest_vol == 3 else 'MEDIUM'}")
-                
-                log(f"   Waktu : {utc7_time.strftime('%d %b %H:%M')} WIB ({hours}j {mins}m lagi)")
+                    news_time_wib = news['time'] + timedelta(hours=7)
+                    time_str = news_time_wib.strftime('%H:%M')
+                    log(f"   {i}. {impact_icon} {news['name']} ({news['country']})")
+                    log(f"      Jam: {time_str} WIB | Dampak: {news['vol_label']}")
+                    if news.get('consensus') is not None and news.get('previous') is not None:
+                        cons = news['consensus']
+                        prev = news['previous']
+                        if cons > prev:
+                            exp = "🟢 BULLISH"
+                        elif cons < prev:
+                            exp = "🔴 BEARISH"
+                        else:
+                            exp = "⚪ NETRAL"
+                        log(f"      Consensus {cons} vs Previous {prev} → {exp}")
+                    else:
+                        log(f"      Consensus/Previous tidak tersedia")
+                        
+                    log(f"")
                 
                 analysis_news = first_news
-                
                 if analysis_news.get('consensus') is not None and analysis_news.get('previous') is not None:
                     consensus = analysis_news['consensus']
                     previous = analysis_news['previous']
@@ -797,7 +831,6 @@ def display_news_and_hmr(hmr_periods, symbols_data=None, today_news=None, tomorr
                                 sell_pct = round(symbols_data[sym]['sell'] * 100, 2)
                                 sent_flag = get_sentiment_flag(buy_pct, sell_pct)
                                 log(f"      Sentimen {sym}: {sent_flag}")
-                                
                                 if "BUY" in sent_flag and consensus < previous:
                                     log(f"      ✅ KONFIRMASI: Sentimen & ekspektasi sama-sama Bearish")
                                 elif "SELL" in sent_flag and consensus > previous:
@@ -808,9 +841,8 @@ def display_news_and_hmr(hmr_periods, symbols_data=None, today_news=None, tomorr
                                     log(f"      ⚠️  KONTRADIKSI: Sentimen Bullish tapi ekspektasi Bearish")
                 
                 all_affected = set()
-                for n in same_time_news:
+                for n in top_news:
                     all_affected.update(get_affected_symbols(n['country']))
-                
                 our_affected = sorted([s for s in SYMBOLS if s in all_affected])
                 if our_affected:
                     log(f"   ⚠️  Pair terdampak: {', '.join(our_affected)}")
@@ -1041,6 +1073,18 @@ def verify_cdp_json():
         print(f"❌ Fail to access url: {e}")
         return False
 
+def generate_strong_password():
+    length = random.randint(8, 15)
+    lower = random.choice(string.ascii_lowercase)
+    upper = random.choice(string.ascii_uppercase)
+    digit = random.choice(string.digits)
+    special = random.choice("!@#$%^&*()-_=+[]{};:,.<>?/")
+    chars = string.ascii_letters + string.digits + "#[]()@$&*!?|,./^+_-"
+    rest = [random.choice(chars) for _ in range(length - 4)]
+    password_list = list(lower + upper + digit + special + ''.join(rest))
+    random.shuffle(password_list)
+    return ''.join(password_list)
+
 async def wait_for_login_and_capture():
     async with async_playwright() as p:
         print("\n" + "="*60)
@@ -1060,7 +1104,7 @@ async def wait_for_login_and_capture():
             return None
 
         context = contexts[0]
-        
+
         target_page = None
 
         for page in context.pages:
@@ -1082,6 +1126,10 @@ async def wait_for_login_and_capture():
             await target_page.goto(TARGET_URL, wait_until="networkidle")
             print(f"   ✅ Halaman terbuka: {target_page.url}")
 
+        CREATE_ACCOUNT_URL = "https://my.ex-markets.pro/pa/new-account/mt5/Standard/demo"
+        ACCOUNTS_URL = "/pa/trading/accounts"
+        create_attempted = False
+
         login_detected = False
         check_count = 0
 
@@ -1093,15 +1141,62 @@ async def wait_for_login_and_capture():
             print(f"\n Still waiting for login...")
             print(f"   🔗 URL saat ini: {current_url[:120]}")
 
-            is_login_page = "/accounts/sign-in" in current_url or "/login" in current_url
-            is_trading_page = "/webtrading/" in current_url and not is_login_page
+            if ACCOUNTS_URL in current_url:
+                if not create_attempted:
+                    create_attempted = True
+                    print("💡 Terdeteksi halaman akun trading (sudah login).")
+                    print("   ➡️  Mengarahkan ke halaman buat akun demo...")
+                    try:
+                        await target_page.goto(CREATE_ACCOUNT_URL, wait_until="domcontentloaded", timeout=30000)
+                    except Exception as e:
+                        print(f"   ⚠️  Gagal navigasi ke halaman buat akun: {e}")
+                        continue
+                    try:
+                        await target_page.wait_for_selector('input[data-test="PasswordField"]', timeout=15000)
+                    except Exception:
+                        print("⚠️  Form pembuatan akun tidak muncul. Lanjut menunggu...")
+                        continue
+                    password_input = await target_page.query_selector('input[data-test="PasswordField"]')
+                    if password_input:
+                        random_password = generate_strong_password()
+                        await password_input.fill(random_password)
+                        print(f"🔑 Password acak telah diisi: {random_password}")
+                    else:
+                        print("⚠️  Field password tidak ditemukan, lanjut menunggu...")
+                        continue
 
-            if is_trading_page:
+                    print("🖱️  Menekan tombol **Create account** secara otomatis...")
+                    try:
+                        create_btn = await target_page.wait_for_selector(
+                            'button[data-test="account-form-submit"]:not([disabled])',
+                            timeout=30000
+                        )
+                        await create_btn.click()
+                        print("✅ Tombol Create account berhasil ditekan.")
+                    except Exception as e:
+                        print(f"⚠️  Gagal menekan tombol otomatis: {e}")
+                        print("   Silakan tekan tombol **Create account** secara manual.")
+                    try:
+                        await target_page.wait_for_function(
+                            "window.location.href.indexOf('/pa/new-account/') === -1",
+                            timeout=120000
+                        )
+                        print("✅ Pembuatan akun selesai. Melanjutkan...")
+                    except Exception:
+                        print("⚠️  Timeout menunggu pembuatan akun. Periksa manual.")
+                else:
+                    print("✅ Akun trading sudah tersedia. Melanjutkan ke WebTrading...")
+                    await target_page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=30000)
+                    await asyncio.sleep(5)
+                continue
+
+            elif "/accounts/sign-in" in current_url or "/login" in current_url:
+                if check_count == 1:
+                    print("   💡 Silakan login terlebih dahulu.")
+
+            elif "/webtrading/" in current_url and "/accounts/sign-in" not in current_url:
                 login_detected = True
                 break
-            elif is_login_page:
-                if check_count == 1:
-                    print("   💡 Please login to ur account")
             else:
                 print(f"   🔍 Berada di halaman lain: {current_url[:100]}")
                 try:
@@ -1122,12 +1217,10 @@ async def wait_for_login_and_capture():
 
         print(f"\n✅ Login confirmed ! Get token...")
         await asyncio.sleep(WAIT_AFTER_RELOAD)
-        
-        await target_page.reload(wait_until="networkidle")
-        
+
         captured_auths = []
         rtapi_captured = {}
-        
+
         def on_request(request):
             url = request.url
             if "all/" in url or "sentiment" in url.lower() or "api" in url.lower():
@@ -1143,7 +1236,6 @@ async def wait_for_login_and_capture():
                         print(f"🎯 REQUEST TERTANGKAP!")
                         print(f"🔗 URL: {url}")
                         print(f"🔑 Authorization: {auth[:80]}...")
-
                         captured_auths.append({
                             "url": url,
                             "authorization": auth,
@@ -1161,27 +1253,37 @@ async def wait_for_login_and_capture():
                         print(f"\n🔧 RT-API TERTANGKAP!")
                         print(f"   Base URL: {base_url}")
                         print(f"   X-CID: {x_cid}")
-        
+
         target_page.on("request", on_request)
 
-        await target_page.reload(wait_until="networkidle")
+        try:
+            await target_page.reload(wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            print(f"⚠️  Reload halaman gagal/timeout: {e}")
+            print("   Tetap melanjutkan, request mungkin sudah tertangkap...")
+
         await asyncio.sleep(WAIT_AFTER_RELOAD)
         await browser.close()
 
         if captured_auths:
             token_preview = captured_auths[0]['authorization'][:80] + "..."
             
-            with open(CONFIG_FILE, "w") as f:
-                f.write("=== HASIL TANGKAPAN AUTHORIZATION ===\n")
-                f.write(f"Waktu: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                for i, item in enumerate(captured_auths, 1):
-                    f.write(f"{i}. URL: {item['url']}\n")
-                    f.write(f"   Token: {item['authorization']}\n\n")
-            print(f"\n💾 Raw log saved in: {CONFIG_FILE}")
+            raw_log = "=== HASIL TANGKAPAN AUTHORIZATION ===\n"
+            raw_log += f"Waktu: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            for i, item in enumerate(captured_auths, 1):
+                raw_log += f"{i}. URL: {item['url']}\n"
+                raw_log += f"   Token: {item['authorization']}\n\n"
+            
+            if write_text_safe(CONFIG_FILE, raw_log):
+                print(f"\n💾 Raw log saved in: {CONFIG_FILE}")
+            else:
+                print(f"\n⚠️  Gagal menyimpan raw log, melanjutkan...")
 
             if rtapi_captured.get("base_url") and rtapi_captured.get("x_cid"):
-                save_rtapi_config(rtapi_captured["base_url"], rtapi_captured["x_cid"])
-                print(f"🔧 RT-API config saved to {CONFIG_FILE}")
+                if save_rtapi_config(rtapi_captured["base_url"], rtapi_captured["x_cid"]):
+                    print(f"🔧 RT-API config saved to {CONFIG_FILE}")
+                else:
+                    print("❌ RT-API config gagal disimpan.")
                 global RTAPI_BASE_URL, RTAPI_X_CID
                 RTAPI_BASE_URL = rtapi_captured["base_url"]
                 RTAPI_X_CID = rtapi_captured["x_cid"]
@@ -1225,9 +1327,7 @@ def refresh_token():
             token = auth_header
         JWT_TOKEN = token
         save_token(token)
-        
         hide_file(CONFIG_FILE)
-        
         RTAPI_BASE_URL, RTAPI_X_CID = load_rtapi_config()
         
         clean_chrome_history()
@@ -1243,12 +1343,10 @@ def refresh_token():
         return False
 
 def main():
-    global JWT_TOKEN, last_valid_data
-
+    global JWT_TOKEN, last_valid_data, RTAPI_BASE_URL, RTAPI_X_CID
     cfg = load_config()
     JWT_TOKEN = cfg.get("jwt_token", "")
     RTAPI_BASE_URL, RTAPI_X_CID = load_rtapi_config()
-
     if os.path.exists(CONFIG_FILE):
         hide_file(CONFIG_FILE)
     
@@ -1290,7 +1388,6 @@ def main():
         
         if symbols_data:
             log(f"{CHECK} {len(symbols_data)} dari {len(SYMBOLS)} simbol ditemukan.")
-
             hmr_data_init = fetch_hmr_today()
             hmr_status_init = check_hmr_for_symbols(hmr_data_init) if hmr_data_init else {}
             today_news_init, tomorrow_news_init = fetch_trading_central_news()
@@ -1352,7 +1449,6 @@ def main():
                 symbols_data, data_status = find_matching_symbols(data)
                 dxy_warning, dxy_reason = check_dxy_warning(symbols_data, data_status)
                 candle_predictions, candle_stats = calculate_candle_statistics(symbols_data, dxy_warning, data_status)
-                
                 hmr_data = []
                 hmr_status = {}
                 today_news = []
