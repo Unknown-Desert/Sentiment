@@ -42,7 +42,6 @@ else:
 SHOW_TIMESTAMP = False
 
 API_URL = "https://my.ex-markets.pro/v4/tex-api/v1/sentiment/all/"
-CSV_FILE = r"C:\Users\User MSI\Desktop\sentiment_data.csv"
 HMR_API_URL = "https://my.ex-markets.pro/v4/tex-api/v2/forex-news/margin/today/"
 TRADING_CENTRAL_NEWS_URL = "https://my.ex-markets.pro/v4/tex-api/v1/trading-central-news/events/en/"
 
@@ -121,10 +120,7 @@ def hide_file(filepath):
             if ret:
                 return True
             else:
-                subprocess.run(["attrib", "+h", filepath], 
-                             stdout=subprocess.DEVNULL, 
-                             stderr=subprocess.DEVNULL,
-                             shell=True)
+                subprocess.run(["attrib", "+h", filepath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
                 return True
         else:
             return True
@@ -242,50 +238,6 @@ def check_dxy_warning(symbols_data, data_status=None):
         return True, "Data DXY tidak valid (nilai negatif)"
     
     return False, "DXY normal"
-
-def write_csv(symbols_data, dxy_warning=False, data_status=None, candle_predictions=None):
-    if data_status is None:
-        data_status = {}
-    if candle_predictions is None:
-        candle_predictions = {}
-
-    with open(CSV_FILE, 'w') as f:
-        row_parts = []
-        
-        for sym in SYMBOLS:
-            if sym in symbols_data:
-                buy_pct = round(symbols_data[sym]['buy'] * 100, 2)
-                sell_pct = round(symbols_data[sym]['sell'] * 100, 2)
-                row_parts.append(str(buy_pct))
-                row_parts.append(str(sell_pct))
-                
-                if sym in data_status:
-                    row_parts.append(str(data_status[sym]))
-                else:
-                    row_parts.append("1")
-                
-                if sym == "DXY" and data_status.get("DXY", 1) != 1:
-                    row_parts.append("WARNING")
-                elif sym in candle_predictions:
-                    direction = candle_predictions[sym]
-                    if direction == ARROW_UP:
-                        row_parts.append("UP")
-                    elif direction == ARROW_DOWN:
-                        row_parts.append("DOWN")
-                    else:
-                        row_parts.append("SIDEWAYS")
-                else:
-                    row_parts.append("N/A")
-            else:
-                row_parts.append("0")
-                row_parts.append("0")
-                row_parts.append("-1")
-                row_parts.append("N/A")
-        
-        row_parts.append("1" if dxy_warning else "0")
-        row_parts.append(str(time.time()))
-        
-        f.write(','.join(row_parts))
 
 def generate_request_id():
     return str(uuid.uuid4()).replace('-', '')
@@ -654,9 +606,7 @@ def calculate_candle_statistics(symbols_data, dxy_warning=False, data_status=Non
     
     return predictions, stats
 
-def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMUA SIMBOL",
-                           data_status=None, hmr_status=None, today_news=None, tomorrow_news=None,
-                           prices=None):
+def display_all_sentiments(symbols_data, dxy_warning=False, title="SENTIMEN SEMUA SIMBOL", data_status=None, hmr_status=None, today_news=None, tomorrow_news=None, prices=None):
     if data_status is None:
         data_status = {}
     if hmr_status is None:
@@ -919,13 +869,9 @@ def force_close_chrome():
     print("\n🔴 Menutup paksa Chrome...")
     try:
         if platform.system() == "Windows":
-            subprocess.run(["taskkill", "/f", "/im", "chrome.exe"], 
-                         stdout=subprocess.DEVNULL, 
-                         stderr=subprocess.DEVNULL)
+            subprocess.run(["taskkill", "/f", "/im", "chrome.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
-            subprocess.run(["pkill", "-f", "chrome"], 
-                         stdout=subprocess.DEVNULL, 
-                         stderr=subprocess.DEVNULL)
+            subprocess.run(["pkill", "-f", "chrome"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
         print("   ✅ Chrome berhasil ditutup.")
     except Exception as e:
@@ -1368,7 +1314,6 @@ def main():
     
     log("=" * 60)
     log("Sentiment Data Realtime Monitor")
-    log(f"CSV Output: {CSV_FILE}")
     log(f"{len(SYMBOLS)} Symbols: {', '.join(SYMBOLS)}")
     log("=" * 60)
     
@@ -1413,13 +1358,8 @@ def main():
             except Exception as e:
                 log(f"{WARNING} Gagal fetch harga awal: {e}")
             
-            display_all_sentiments(symbols_data, dxy_warning, "STATUS SENTIMEN AWAL", 
-                                 data_status, hmr_status=hmr_status_init, 
-                                 today_news=today_news_init, tomorrow_news=tomorrow_news_init,
-                                 prices=prices_init)
+            display_all_sentiments(symbols_data, dxy_warning, "STATUS SENTIMEN AWAL", data_status, hmr_status=hmr_status_init, today_news=today_news_init, tomorrow_news=tomorrow_news_init, prices=prices_init)
             
-            csv_predictions = {sym: pred['direction'] for sym, pred in candle_predictions.items()}
-            write_csv(symbols_data, dxy_warning, data_status, csv_predictions)
         else:
             log(f"{WARNING} Tidak ada simbol yang cocok.")
     else:
@@ -1499,12 +1439,7 @@ def main():
                     if dxy_warning:
                         title += " [DXY WARNING]"
                     
-                    display_all_sentiments(symbols_data, dxy_warning, title, 
-                                         data_status,
-                                         hmr_status=hmr_status,
-                                         today_news=today_news,
-                                         tomorrow_news=tomorrow_news,
-                                         prices=prices)
+                    display_all_sentiments(symbols_data, dxy_warning, title, data_status, hmr_status=hmr_status, today_news=today_news, tomorrow_news=tomorrow_news, prices=prices)
                     
                     if cycle_count == 1 or (dxy_warning_cycles == 1 and dxy_warning) or (dxy_warning_cycles == 0 and not dxy_warning and cycle_count > 1):
                         (dxy_warning, dxy_reason)
@@ -1515,9 +1450,6 @@ def main():
                         log(f"{WARNING} Modul berita error (tidak menghentikan bot): {e}")
                     
                     print()
-                    
-                    csv_predictions = {sym: pred['direction'] for sym, pred in candle_predictions.items()}
-                    write_csv(symbols_data, dxy_warning, data_status, csv_predictions)
                 else:
                     log(f"{WARNING} Tidak ada simbol yang cocok.")
             else:
