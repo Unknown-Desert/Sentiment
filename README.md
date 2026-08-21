@@ -34,22 +34,28 @@ pip install -r requirements.txt
 - requests>=2.28.0
 
 
-📋 Prerequisites
+How to Use in Termux:
 
-- Python 3.7+
-- Google Chrome (auto-detected, or specify path manually)
-- Windows, macOS, or Linux
-- Stable internet connection
-- Active Exness trading account (for one-time manual login)
+1. Type one by one:
+   termux-setup-storage
+   pkg update -y && pkg upgrade -y && pkg install git -y
+2. Paste into Termux to download the data:
 
+git clone https://githttps://github.com/Unknown-Desert/Sentiment.git
 
+Target Result:
 
-How To Use:
+Make sure there is install.sh + sen.py
 
-1. Download Sen.py
-2. Run -> python Sen.py
-3. Log-in your Exnees Account for once if needed
-4. Then the datas will show:
+Run or if already:
+
+1. Only once for the first install:
+
+sh install.sh
+
+2. Every time you want to run the code:
+
+python sen.py
 
 
 📊 Sample Output
