@@ -41,7 +41,9 @@ How to Use in Termux:
    pkg update -y && pkg upgrade -y && pkg install git -y
 2. Paste into Termux to download the data:
 
-git clone https://githttps://github.com/Unknown-Desert/Sentiment.git
+```bash
+git clone https://github.com/Unknown-Desert/Sentiment.git
+```
 
 Target Result:
 
