@@ -21,9 +21,6 @@ A real-time monitoring tool for Broker trading platform that tracks sentiment da
   - Sentiment confirmation/contradiction checks
 - DXY Warning System: Invalid DXY data triggers "NO ENTRY" recommendation
 - Statistics Dashboard: Bullish/Bearish/Sideways dominance percentages
-- CSV Export: Automatic data export for integration with other tools
-- Auto Token Capture: JWT token extracted via Chrome DevTools Protocol
-- Auto Token Refresh: Handles 401 errors by re-launching Chrome for re-login
 
 
 Installation:
