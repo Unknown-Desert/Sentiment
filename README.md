@@ -1,4 +1,4 @@
-# Sentiment
+# Sentiment Mobiles
 
 📊 Broker Realtime Sentiment & News Monitor
 
