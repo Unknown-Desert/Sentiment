@@ -48,7 +48,7 @@ git clone https://github.com/Unknown-Desert/Sentiment.git
 
 Target Result:
 
-Make sure there is Sentiment
+Make sure there is Sentiment folder
 
 ```bash
 ls
@@ -58,7 +58,7 @@ Open Folder:
 ```bash
 cd Sentiment
 ```
-Make sure there is install.sh + sen.py
+Make sure there are install.sh + sen.py
 
 ```bash
 ls -All
