@@ -37,9 +37,13 @@ pip install -r requirements.txt
 How to Use in Termux:
 
 1. Type one by one:
+```bash
    termux-setup-storage
+```
+```bash
    pkg update -y && pkg upgrade -y && pkg install git -y
-2. Paste into Termux to download the data:
+```
+3. Paste into Termux to download the data:
 
 ```bash
 git clone https://github.com/Unknown-Desert/Sentiment.git
@@ -52,13 +56,13 @@ Make sure there is install.sh + sen.py
 Run or if already:
 
 1. Only once for the first install:
-
+```bash
 sh install.sh
-
+```
 2. Every time you want to run the code:
-
+```bash
 python sen.py
-
+```
 
 📊 Sample Output
 
