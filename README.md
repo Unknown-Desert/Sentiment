@@ -40,7 +40,7 @@ How to Use in Termux:
 ```bash
    pkg update -y && pkg upgrade -y && pkg install git -y
 ```
-3. Paste into Termux to download the data:
+2. Paste into Termux to download the data:
 
 ```bash
 git clone https://github.com/Unknown-Desert/Sentiment.git
@@ -48,7 +48,21 @@ git clone https://github.com/Unknown-Desert/Sentiment.git
 
 Target Result:
 
-Make sure there is install.sh + sen.py
+Make sure there is Sentiment folder
+
+```bash
+ls
+```
+Open Folder:
+
+```bash
+cd Sentiment
+```
+Make sure there are install.sh + sen.py
+
+```bash
+ls -All
+```
 
 Run or if already:
 
