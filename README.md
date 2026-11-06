@@ -1,5 +1,7 @@
 # Sentiment Mobile
 
+NOT FIXED YET
+
 📊 Broker Realtime Sentiment & News Monitor
 
 A real-time monitoring tool for Broker trading platform that tracks sentiment data (buy/sell percentages) across multiple trading pairs, provides candle direction predictions, economic news alerts, High Margin Requirement (HMR) status, and live prices — all updated every 60 seconds.
