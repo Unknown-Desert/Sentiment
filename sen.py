@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-
 import json
 import os
 import shutil
 import signal
-import sys
 import time
 import unicodedata
 import uuid
@@ -21,10 +19,10 @@ from Ratelimit import (
     configure,
 )
 
-INTERVAL_SEC           = int(os.environ.get("SENTIMENT_INTERVAL", "60"))
-PRICE_FETCH_EVERY_N    = max(1, int(os.environ.get("SENTIMENT_PRICE_EVERY", "2")))
-LOG_FILE               = os.environ.get("SENTIMENT_LOG_FILE", "").strip()
-ENV_CONFIG_DIR         = os.environ.get("SENTIMENT_CONFIG_DIR", "").strip()
+INTERVAL_SEC         = int(os.environ.get("SENTIMENT_INTERVAL", "30"))
+PRICE_FETCH_EVERY_N  = max(1, int(os.environ.get("SENTIMENT_PRICE_EVERY", "2")))
+LOG_FILE             = os.environ.get("SENTIMENT_LOG_FILE", "").strip()
+ENV_CONFIG_DIR       = os.environ.get("SENTIMENT_CONFIG_DIR", "").strip()
 
 configure({
     "user_agent": (
@@ -35,26 +33,29 @@ configure({
     "max_requests_per_second": 2.0,
     "max_requests_per_minute": 20,
     "timeouts": {
-        "sentiment": 20,
+        "sentiment": 15,
         "price":     10,
         "news":      15,
         "hmr":       15,
         "default":   15,
     },
     "cache_ttl": {
-        "sentiment": 30,
-        "price":     120,
+        "sentiment": 20,
+        "price":     45,
         "news":      120,
         "hmr":       300,
         "default":   0,
     },
 })
 
-BASE_EXTRA = {"Referer": "https://my.ex-markets.pro/webtrading/"}
+BASE_EXTRA = {
+    "Referer": "https://my.exness.com/webtrading/",
+    "Origin":  "https://my.exness.com",
+}
 
-API_URL        = "https://my.ex-markets.pro/v4/tex-api/v1/sentiment/all/"
-HMR_API_URL    = "https://my.ex-markets.pro/v4/tex-api/v2/forex-news/margin/today/"
-NEWS_API_URL   = "https://my.ex-markets.pro/v4/tex-api/v1/trading-central-news/events/en/"
+API_URL        = "https://my.exness.com/v4/tex-api/v1/sentiment/all/"
+HMR_API_URL    = "https://my.exness.com/v4/tex-api/v2/forex-news/margin/today/"
+NEWS_API_URL   = "https://my.exness.com/v4/tex-api/v1/trading-central-news/events/en/"
 RAW_GIST_URL   = (
     "https://gist.githubusercontent.com/Unknown-Desert/"
     "146a7511ec3f1af5d549ba7fa38e2a26/raw/Sentiment_Dat.txt"
@@ -87,7 +88,7 @@ RTAPI_BASE_URL = ""
 RTAPI_X_CID    = ""
 
 last_valid_data: dict = {}
-_prices_cache: dict = {} 
+_prices_cache: dict = {}
 
 def _detect_unicode() -> bool:
     try:
@@ -106,13 +107,12 @@ if UNICODE_SUPPORT:
     WARNING        = "⚠️"
     CROSS          = "❌"
     CHECK          = "✅"
-    DOT_FILL       = "·"
 else:
     ARROW_UP = "^"; ARROW_DOWN = "v"; ARROW_SIDEWAYS = "-"
-    WARNING = "!!"; CROSS = "XX"; CHECK = "OK"; DOT_FILL = "."
+    WARNING = "!!"; CROSS = "XX"; CHECK = "OK"
 
 _WIDE_CHARS = set(
-    "⬆⬇⇕⚠✅❌🔴🟢🟡⚪📅⏳🔥👀💡💵📉🛢🌏🌅⛔"
+    "⬆⬇⇕⚠✅❌🔴🟢🟡⚪📅⏳🔥👀💡💵📉🛢🌏🌅⛔🔒🟠"
 )
 
 def _vp(text: str, width: int) -> str:
@@ -199,10 +199,7 @@ def load_config() -> dict:
             pass
     return {}
 
-def load_token() -> str:
-    return load_config().get("jwt_token", "")
-
-def load_rtapi_config() -> tuple[str, str]:
+def load_rtapi_config() -> tuple:
     cfg = load_config()
     return cfg.get("rtapi_base_url", ""), cfg.get("rtapi_x_cid", "")
 
@@ -250,7 +247,7 @@ def get_sentiment_flag(buy_pct: float, sell_pct: float) -> str:
     if buy_pct >= 60:  return "🟢 BUY"
     return "⚪ BALANCE"
 
-def check_dxy_warning(symbols_data: dict, data_status: dict | None = None):
+def check_dxy_warning(symbols_data: dict, data_status: dict = None):
     if data_status is None:
         data_status = {}
     dxy = symbols_data.get("DXY")
@@ -279,8 +276,8 @@ def fetch_price_for_symbol(symbol: str):
             "price": "bid",
         }
         headers = build_session_headers(JWT_TOKEN, extra={
-            "Referer":         "https://my.ex-markets.pro/",
-            "Origin":          "https://my.ex-markets.pro",
+            "Referer":         "https://my.exness.com/",
+            "Origin":          "https://my.exness.com",
             "Accept-Language": "en-US,en;q=0.9",
             "x-cid":           RTAPI_X_CID,
             "x-request-id":    generate_request_id(),
@@ -544,6 +541,7 @@ def display_compact(symbols_data, dxy_warning, title,
             log(f"{sym:<6} | {bp:>5.1f}% | {sp:>5.1f}% | "
                 f"{_vp(candle, 8):^8} | {_vp(news, 8):^8} | "
                 f"{price:>11} | {_vp(flag, 12):^12}")
+
             is_hmr, lev, st, en = hmr_status.get(sym, (False, None, None, None))
             if is_hmr and lev and st and en:
                 log(f"   {_fmt_margin_hmr(lev, st, en)}")
@@ -633,7 +631,6 @@ for _sig in (signal.SIGINT, signal.SIGTERM):
     except (ValueError, OSError):
         pass
 
-
 def _try_wake_lock():
     if not shutil.which("termux-wake-lock"):
         return
@@ -708,11 +705,9 @@ def run_cycle(cycle_num: int, dxy_state: dict):
     symbols_data, data_status = find_matching_symbols(data)
     dxy_warning, _ = check_dxy_warning(symbols_data, data_status)
 
-    # HMR
     hmr_data = fetch_hmr_today()
     hmr_status = check_hmr_for_symbols(hmr_data) if hmr_data else {}
 
-    # News
     today_news, tomorrow_news = fetch_trading_central_news()
 
     global _prices_cache
@@ -733,7 +728,7 @@ def run_cycle(cycle_num: int, dxy_state: dict):
     dxy_state["prev"] = dxy_warning
     dxy_state["cycles"] = dxy_state["cycles"] + 1 if dxy_warning else 0
 
-    title = "SIKLUS SENTIMEN"
+    title = f"SIKLUS #{cycle_num} — {time.strftime('%H:%M:%S')}"
     if dxy_warning:
         title += " [DXY WARNING]"
 
@@ -761,7 +756,8 @@ def main():
     log("SENTIMENT MONITOR — TERMUX MOBILE")
     log(f"  Symbols   : {len(SYMBOLS)}")
     log(f"  Interval  : {INTERVAL_SEC}s")
-    log(f"  Price     : setiap {PRICE_FETCH_EVERY_N} siklus")
+    log(f"  Price     : setiap {PRICE_FETCH_EVERY_N} siklus ({INTERVAL_SEC * PRICE_FETCH_EVERY_N}s)")
+    log(f"  Domain    : my.exness.com")
     log(f"  Config    : {CONFIG_FILE}")
     if LOG_FILE:
         log(f"  Log file  : {LOG_FILE}")

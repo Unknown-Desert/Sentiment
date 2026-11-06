@@ -1,3 +1,4 @@
+# Ratelimit.py
 from __future__ import annotations
 
 import base64
@@ -10,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
 import requests
+
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "max_requests_per_second": 4.0,
@@ -39,19 +41,19 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "token_refresh_buffer": 300,
 }
 
+
 _LEGACY_MODE: bool = True
 _ENCODING_CACHE: Optional[str] = None
 _ENCODING_LOCK = threading.Lock()
+
 
 def _detect_accept_encoding() -> str:
     global _ENCODING_CACHE
     if _ENCODING_CACHE is not None:
         return _ENCODING_CACHE
-
     with _ENCODING_LOCK:
         if _ENCODING_CACHE is not None:
             return _ENCODING_CACHE
-
         encodings = ["gzip", "deflate"]
         try:
             import brotli  # noqa: F401
@@ -67,13 +69,13 @@ def _detect_accept_encoding() -> str:
             encodings.append("zstd")
         except ImportError:
             pass
-
         _ENCODING_CACHE = ", ".join(encodings)
         return _ENCODING_CACHE
 
 
 class CircuitOpenError(Exception):
     pass
+
 
 class RateLimiter:
     def __init__(self, max_per_sec: float, max_per_min: int):
@@ -91,13 +93,11 @@ class RateLimiter:
                     self._sec.popleft()
                 while self._min and now - self._min[0] > 60.0:
                     self._min.popleft()
-
                 if (len(self._sec) < self.max_per_sec and
                         len(self._min) < self.max_per_min):
                     self._sec.append(now)
                     self._min.append(now)
                     return
-
                 wait = 0.0
                 if len(self._sec) >= self.max_per_sec:
                     wait = max(wait, 1.0 - (now - self._sec[0]))
@@ -105,6 +105,7 @@ class RateLimiter:
                     wait = max(wait, 60.0 - (now - self._min[0]))
                 wait = max(wait, 0.05)
             time.sleep(wait)
+
 
 class TTLCache:
     def __init__(self):
@@ -127,6 +128,7 @@ class TTLCache:
             return
         with self._lock:
             self._store[key] = (value, time.monotonic() + ttl)
+
 
 class _CircuitState:
     __slots__ = ("failures", "open_until")
@@ -164,6 +166,7 @@ class CircuitBreaker:
             st = self._states[endpoint]
             st.failures = 0
             st.open_until = 0.0
+
 
 class Metrics:
     def __init__(self, ring_size: int = 200):
@@ -216,6 +219,7 @@ class Metrics:
                 "recent": list(self._ring)[-10:],
             }
 
+
 class CachedResponse:
     __slots__ = ("status_code", "data", "text", "from_cache", "error",
                  "content_type", "cf_challenge", "used_fallback",
@@ -248,13 +252,12 @@ class CachedResponse:
                 f"cache={self.from_cache} fallback={self.used_fallback} "
                 f"err={self.error}>")
 
+
 def _looks_like_cloudflare(resp: requests.Response) -> bool:
     hl = {k.lower(): v for k, v in resp.headers.items()}
-
     cf_mitigated = hl.get("cf-mitigated", "").lower()
     if cf_mitigated in ("challenge", "managed_challenge"):
         return True
-
     ct = hl.get("content-type", "").lower()
     if "html" in ct or not ct:
         body = (resp.text or "")[:2000].lower()
@@ -266,26 +269,21 @@ def _looks_like_cloudflare(resp: requests.Response) -> bool:
         )
         if any(m in body for m in markers):
             return True
-
     return False
 
 
 def _safe_json(resp: requests.Response) -> Tuple[Optional[Any], Optional[str]]:
     if not resp.content:
         return None, "empty_body"
-
     try:
         return resp.json(), None
     except Exception as parse_err:
         pass
-
     if _looks_like_cloudflare(resp):
         preview = (resp.text or "")[:150].replace("\n", " ").strip()
         return None, f"cloudflare_challenge preview={preview!r}"
-
     ct = resp.headers.get("Content-Type", "").lower()
     preview = (resp.text or "")[:200].replace("\n", " ").strip()
-
     try:
         raw = resp.content
         for enc in ("utf-8", "utf-8-sig", "latin-1"):
@@ -297,7 +295,6 @@ def _safe_json(resp: requests.Response) -> Tuple[Optional[Any], Optional[str]]:
                 continue
     except Exception:
         pass
-
     return None, f"json_error={parse_err} ct={ct!r} preview={preview!r}"
 
 
@@ -317,6 +314,7 @@ def _parse_retry_after(resp: requests.Response) -> Optional[float]:
         return max((dt - datetime.now(timezone.utc)).total_seconds(), 0.0)
     except Exception:
         return None
+
 
 def _build_legacy_headers(token: Optional[str],
                           extra: Optional[Dict[str, str]],
@@ -368,6 +366,7 @@ def build_headers(token: Optional[str] = None,
         return _build_legacy_headers(token, extra, cfg)
     return _build_modern_headers(token, extra, cfg)
 
+
 def check_token_expiry(token: str,
                        buffer_seconds: int = 300
                        ) -> Tuple[bool, Optional[int]]:
@@ -386,6 +385,7 @@ def check_token_expiry(token: str,
         return left < buffer_seconds, left
     except Exception:
         return False, None
+
 
 class RateLimitedClient:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -526,13 +526,11 @@ class RateLimitedClient:
                     self.circuit.record_failure(endpoint)
                 print(f"[Ratelimit] {endpoint} attempt {attempt+1}: "
                       f"{type(e).__name__}: {e}")
-
                 if not _LEGACY_MODE:
                     self._switch_to_legacy(
                         f"request network: {type(e).__name__}")
                     eff_headers = self._rebuild_legacy_headers(eff_headers)
                     continue
-
                 if attempt >= retries:
                     return CachedResponse(
                         0, error="network", text=str(e),
@@ -634,6 +632,7 @@ class RateLimitedClient:
                               text=str(last_exc or "unknown"),
                               exception_type=(type(last_exc).__name__
                                               if last_exc else None))
+
 
 _CLIENT: Optional[RateLimitedClient] = None
 _CLIENT_LOCK = threading.Lock()
